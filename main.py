@@ -1,4 +1,8 @@
 import os
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from openai import OpenAI
 
 
@@ -10,18 +14,15 @@ MODEL_NAME = "gpt-4o-mini"
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not API_KEY:
-    raise RuntimeError(
-        "OPENAI_API_KEY পাওয়া যায়নি। "
-        "আপনার environment variable-এ OpenAI API key সেট করুন।"
-    )
-
 
 # ============================================================
 # OPENAI CLIENT
 # ============================================================
 
-client = OpenAI(api_key=API_KEY)
+client = None
+
+if API_KEY:
+    client = OpenAI(api_key=API_KEY)
 
 
 # ============================================================
@@ -311,6 +312,12 @@ conversation = [
 
 def ask_jarvis(user_text: str) -> str:
 
+    if not client:
+        raise RuntimeError(
+            "OPENAI_API_KEY পাওয়া যায়নি। "
+            "আপনার environment variable-এ OpenAI API key সেট করুন।"
+        )
+
     conversation.append({
         "role": "user",
         "content": user_text
@@ -337,6 +344,91 @@ def ask_jarvis(user_text: str) -> str:
 
 
 # ============================================================
+# FASTAPI APPLICATION
+# ============================================================
+
+app = FastAPI(
+    title="JARVIS AI Call Assistant",
+    description="JARVIS Personal AI Call-Screening Assistant Backend",
+    version="1.0.0"
+)
+
+
+# ============================================================
+# CORS
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# REQUEST MODEL
+# ============================================================
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "JARVIS AI Call Assistant",
+        "model": MODEL_NAME
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "openai_configured": bool(API_KEY)
+    }
+
+
+# ============================================================
+# CHAT ENDPOINT
+# ============================================================
+
+@app.post("/chat")
+def chat(request: ChatRequest):
+
+    message = request.message.strip()
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Message খালি হতে পারবে না।"
+        )
+
+    try:
+
+        answer = ask_jarvis(message)
+
+        return {
+            "success": True,
+            "response": answer
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+
+# ============================================================
 # TEST MODE
 # ============================================================
 
@@ -346,7 +438,14 @@ def run_test():
     print("              JARVIS AI CALL ASSISTANT")
     print("=" * 60)
     print(f"Model: {MODEL_NAME}")
-    print("Status: Online")
+
+    if API_KEY:
+        print("OpenAI API: Configured")
+        print("Status: Online")
+    else:
+        print("OpenAI API: NOT CONFIGURED")
+        print("Status: Offline")
+
     print("Test Mode চালু হয়েছে।")
     print("বন্ধ করতে লিখুন: exit")
     print("=" * 60)
